@@ -2,6 +2,10 @@ name: Download Manga
 on:
   workflow_dispatch:
 
+# Required permission to create a Release
+permissions:
+  contents: write
+
 jobs:
   scrape-and-pack:
     runs-on: ubuntu-latest
@@ -17,13 +21,18 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 curl-cffi
 
-      # The "-u" flag forces Python to print logs immediately in real-time
       - name: Run Scraper
         run: python -u scraper.py
 
-      - name: Upload Master ZIP Artifact
-        uses: actions/upload-artifact@v4
+      - name: Zip the CBZ files
+        run: zip -r Lookism_Chapters.zip CBZ_Files/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: Lookism-Chapters
-          path: "CBZ_Files/"
-          retention-days: 7
+          tag_name: download-${{ github.run_id }}
+          name: "Lookism Download - Run ${{ github.run_number }}"
+          body: "Automated manga download."
+          files: Lookism_Chapters.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
