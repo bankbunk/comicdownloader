@@ -2,7 +2,6 @@ name: Download Manga
 on:
   workflow_dispatch:
 
-# Required permission to create a Release
 permissions:
   contents: write
 
@@ -24,15 +23,25 @@ jobs:
       - name: Run Scraper
         run: python -u scraper.py
 
-      - name: Zip the CBZ files
-        run: zip -r Lookism_Chapters.zip CBZ_Files/
+      - name: Zip into safe 150-chapter chunks (Bypass 2GB Limit)
+        run: |
+          mkdir -p Release_Zips
+          cd CBZ_Files
+          # Group the CBZ files into batches of 150 to keep zip sizes under 2GB
+          files=( *.cbz )
+          chunk_size=150
+          for (( i=0; i<${#files[@]}; i+=chunk_size )); do
+            part=$(printf "%02d" $((i/chunk_size + 1)))
+            # -0 means "store" (don't recompress already compressed files, makes it instant)
+            zip -0 ../Release_Zips/Lookism_Part_${part}.zip "${files[@]:i:chunk_size}"
+          done
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: download-${{ github.run_id }}
           name: "Lookism Download - Run ${{ github.run_number }}"
-          body: "Automated manga download."
-          files: Lookism_Chapters.zip
+          body: "Automated manga download. Split into parts to bypass GitHub's 2GB file limit."
+          files: Release_Zips/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
