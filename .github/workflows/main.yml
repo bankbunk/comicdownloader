@@ -17,8 +17,9 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 curl-cffi
 
+      # The "-u" flag forces Python to print logs immediately in real-time
       - name: Run Scraper
-        run: python scraper.py
+        run: python -u scraper.py
 
       - name: Upload Master ZIP Artifact
         uses: actions/upload-artifact@v4
