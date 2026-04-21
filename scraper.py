@@ -8,10 +8,9 @@ import concurrent.futures
 # --- CONFIGURATION ---
 MANGA_BASE_URL = "https://manhwatop.com/manga/lookism-manhwa-series-manhwa/chapter-"
 START_CHAPTER = 40
-END_CHAPTER = 600  # Set to None to download until the end
+END_CHAPTER = 610  # Set to None to download until the end
 OUTPUT_FILE = f"Lookism_{START_CHAPTER}_to_{END_CHAPTER if END_CHAPTER else 'End'}.cbz"
 
-GATEWAY_URL = "https://gateway.niko2nio2.workers.dev/?url="
 MAX_RETRIES = 5
 MAX_THREADS = 10
 
@@ -20,10 +19,9 @@ HEADERS = {
 }
 
 def fetch_with_retries(target_url, is_binary=False):
-    gateway_link = f"{GATEWAY_URL}{target_url}"
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            response = requests.get(gateway_link, headers=HEADERS, timeout=(10, 60))
+            response = requests.get(target_url, headers=HEADERS, timeout=(10, 60))
             response.raise_for_status()
             return response.content if is_binary else response.text
         except Exception as e:
