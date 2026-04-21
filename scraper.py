@@ -8,7 +8,7 @@ import concurrent.futures
 # --- CONFIGURATION ---
 MANGA_BASE_URL = "https://manhwatop.com/manga/lookism-manhwa-series-manhwa/chapter-"
 START_CHAPTER = 40
-END_CHAPTER = 610  # Set to None to download until the end
+END_CHAPTER = None  # Set to None to download until the end
 OUTPUT_FILE = f"Lookism_{START_CHAPTER}_to_{END_CHAPTER if END_CHAPTER else 'End'}.cbz"
 
 MAX_RETRIES = 5
