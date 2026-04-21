@@ -1,0 +1,28 @@
+name: Download Manga
+on:
+  workflow_dispatch: 
+
+jobs:
+  scrape-and-pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Run Scraper
+        run: python scraper.py
+
+      - name: Upload CBZ Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lookism-Manga
+          path: "*.cbz"
+          retention-days: 7
