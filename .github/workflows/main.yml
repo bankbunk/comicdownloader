@@ -1,6 +1,6 @@
 name: Download Manga
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
 
 jobs:
   scrape-and-pack:
@@ -20,9 +20,9 @@ jobs:
       - name: Run Scraper
         run: python scraper.py
 
-      - name: Upload CBZ Artifact
+      - name: Upload Master ZIP Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Lookism-Manga
-          path: "*.cbz"
+          name: Lookism-Chapters
+          path: "CBZ_Files/"
           retention-days: 7
