@@ -8,8 +8,8 @@ import os
 
 # --- CONFIGURATION ---
 MANGA_BASE_URL = "https://manhwatop.com/manga/lookism-manhwa-series-manhwa/chapter-"
-START_CHAPTER = 40
-END_CHAPTER = 100  
+START_CHAPTER = 1
+END_CHAPTER = None  
 
 MAX_RETRIES = 5
 OUTPUT_DIR = "CBZ_Files"
