@@ -9,14 +9,14 @@ import os
 # --- CONFIGURATION ---
 MANGA_BASE_URL = "https://manhwatop.com/manga/lookism-manhwa-series-manhwa/chapter-"
 START_CHAPTER = 40
-END_CHAPTER = None  # Set to None to download until the end
+END_CHAPTER = None  
 
 MAX_RETRIES = 5
 OUTPUT_DIR = "CBZ_Files"
 
-# Speed configuration for GitHub Actions
-MAX_CONCURRENT_CHAPTERS = 3
-MAX_THREADS_PER_CHAPTER = 8
+# LOWERED SPEED to prevent DDoS IP bans from the server
+MAX_CONCURRENT_CHAPTERS = 2
+MAX_THREADS_PER_CHAPTER = 5
 
 # Browser Headers
 HTML_HEADERS = {
@@ -34,11 +34,10 @@ IMAGE_HEADERS = {
 }
 
 def fetch_url(url, is_image=False):
-    """Fetches HTML or Images natively mimicking Google Chrome, no gateway needed."""
     headers = IMAGE_HEADERS if is_image else HTML_HEADERS
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            response = requests.get(url, headers=headers, impersonate="chrome110", timeout=60)
+            response = requests.get(url, headers=headers, impersonate="chrome110", timeout=30)
             if response.status_code == 200:
                 return response.content if is_image else response.text
         except Exception:
@@ -50,7 +49,6 @@ def get_next_chapter(soup, current_url):
     if next_btn and next_btn.get("href"):
         return next_btn["href"]
     
-    # Fallback increment (handles decimals too)
     match = re.search(r'chapter-([\d.]+)', current_url)
     if match:
         prefix = current_url.split(match.group(0))[0] + "chapter-"
@@ -60,7 +58,6 @@ def get_next_chapter(soup, current_url):
     return None
 
 def format_chapter_name(num):
-    """Formats chapter numbers for clean sorting (e.g., 40 -> 0040, 361.1 -> 0361.1)"""
     if num.is_integer():
         return f"{int(num):04d}"
     parts = str(num).split('.')
@@ -73,11 +70,9 @@ def download_image(args):
     return idx, ext, img_data
 
 def process_chapter_images(chapter_num, image_urls):
-    """Background worker that downloads all images and saves the CBZ."""
     ch_str = format_chapter_name(chapter_num)
     cbz_filename = os.path.join(OUTPUT_DIR, f"Lookism_Chapter_{ch_str}.cbz")
     
-    # Give the images an index number for ordering
     image_tasks = [(idx + 1, url) for idx, url in enumerate(image_urls)]
     successful_pages = 0
 
@@ -98,7 +93,7 @@ def main():
     current_chapter_num = float(START_CHAPTER)
     chapter_image_urls = []
     
-    print("Starting background multi-threaded downloads...\n")
+    print("Starting balanced multi-threaded downloads...\n")
 
     chapter_executor = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CHAPTERS)
     active_futures = []
@@ -142,8 +137,10 @@ def main():
             break
             
         current_url = next_url
+        
+        # ARTIFICIAL DELAY: Prevents the scraper from triggering anti-bot firewalls
+        time.sleep(1)
 
-    # Dispatch the final chapter
     if chapter_image_urls:
         active_futures.append(
             chapter_executor.submit(process_chapter_images, current_chapter_num, chapter_image_urls)
