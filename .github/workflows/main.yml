@@ -19,7 +19,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests beautifulsoup4 curl-cffi playwright playwright-stealth
+          pip install requests beautifulsoup4 curl-cffi playwright
           playwright install chromium
 
       - name: Run Scraper
