@@ -1,0 +1,86 @@
+name: Download Manga
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scrape-and-pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 curl-cffi playwright
+          playwright install chromium
+          sudo apt-get install -y zip
+
+      - name: Run Scraper
+        run: python -u scraper.py
+
+      - name: Zip into 95MB chunks
+        run: |
+          # CH_START and CH_END are exported by scraper.py
+          RUN_DIR="downloads/run_${{ github.run_id }}_${CH_START}_to_${CH_END}"
+          mkdir -p "$RUN_DIR"
+          cd CBZ_Files
+          
+          # Enable nullglob so files array is empty if no .cbz exist
+          shopt -s nullglob
+          files=( *.cbz )
+          
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No CBZ files found to zip. Exiting."
+            exit 0
+          fi
+          
+          # Zip all CBZ files into 95MB split volumes
+          zip -0 -s 95m "../$RUN_DIR/Lookism_${CH_START}_to_${CH_END}.zip" *.cbz
+          cd ..
+
+      - name: Commit and Force Push
+        run: |
+          RUN_DIR="downloads/run_${{ github.run_id }}_${CH_START}_to_${CH_END}"
+          
+          # Verify the folder exists and has files
+          if [ ! -d "$RUN_DIR" ] || [ -z "$(ls -A $RUN_DIR)" ]; then
+            echo "No split zips found to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          
+          # Create an orphan branch to prevent repo size from bloating over time
+          git checkout --orphan temp_branch
+          
+          # Add all existing repo files EXCEPT the newly generated zip parts
+          git add -A
+          git reset ${RUN_DIR}/* 2>/dev/null || true
+          
+          git commit -m "Prepare vault for Job ${{ github.run_id }} [skip ci]"
+          git -c push.useForceIfIncludes=false push --force origin HEAD:${GITHUB_REF_NAME}
+          
+          # Add and commit the 95MB chunks one by one
+          for file in ${RUN_DIR}/*; do
+            if [ -f "$file" ]; then
+              echo "Committing $file..."
+              git add "$file"
+              git commit --amend --no-edit
+              git -c push.useForceIfIncludes=false push --force origin HEAD:${GITHUB_REF_NAME}
+            fi
+          done
+          
+          # Final message rename
+          git commit --amend -m "Add Lookism Ch ${CH_START} to ${CH_END} (Run ${{ github.run_id }}) [skip ci]"
+          git -c push.useForceIfIncludes=false push --force origin HEAD:${GITHUB_REF_NAME}
