@@ -1,6 +1,15 @@
 name: Download Manga
 on:
   workflow_dispatch:
+    inputs:
+      storage_mode:
+        description: 'Where to save the downloaded files?'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - repo
 
 permissions:
   contents: write
@@ -28,14 +37,12 @@ jobs:
       - name: Run Scraper
         run: python -u scraper.py
 
-      - name: Zip into 95MB chunks
+      - name: Zip for Release (OG Method - 150 Chapters/Zip)
+        if: github.event.inputs.storage_mode == 'release'
         run: |
-          # CH_START and CH_END are exported by scraper.py
-          RUN_DIR="downloads/run_${{ github.run_id }}_${CH_START}_to_${CH_END}"
-          mkdir -p "$RUN_DIR"
+          mkdir -p Release_Zips
           cd CBZ_Files
           
-          # Enable nullglob so files array is empty if no .cbz exist
           shopt -s nullglob
           files=( *.cbz )
           
@@ -44,15 +51,45 @@ jobs:
             exit 0
           fi
           
-          # Zip all CBZ files into 95MB split volumes
+          chunk_size=150
+          for (( i=0; i<${#files[@]}; i+=chunk_size )); do
+            part=$(printf "%02d" $((i/chunk_size + 1)))
+            zip -0 ../Release_Zips/Lookism_Ch_${CH_START}_to_${CH_END}_Part_${part}.zip "${files[@]:i:chunk_size}"
+          done
+
+      - name: Create Release
+        if: github.event.inputs.storage_mode == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: download-${{ github.run_id }}
+          name: "Lookism Download (Ch ${{ env.CH_START }} - ${{ env.CH_END }}) - Run ${{ github.run_number }}"
+          body: "Automated manga download from Comix.to. Split into parts to bypass GitHub's 2GB file limit."
+          files: Release_Zips/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Zip for Repo (95MB chunks)
+        if: github.event.inputs.storage_mode == 'repo'
+        run: |
+          RUN_DIR="downloads/run_${{ github.run_id }}_${CH_START}_to_${CH_END}"
+          mkdir -p "$RUN_DIR"
+          cd CBZ_Files
+          
+          shopt -s nullglob
+          files=( *.cbz )
+          
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No CBZ files found to zip. Exiting."
+            exit 0
+          fi
+          
           zip -0 -s 95m "../$RUN_DIR/Lookism_${CH_START}_to_${CH_END}.zip" *.cbz
-          cd ..
 
       - name: Commit and Force Push
+        if: github.event.inputs.storage_mode == 'repo'
         run: |
           RUN_DIR="downloads/run_${{ github.run_id }}_${CH_START}_to_${CH_END}"
           
-          # Verify the folder exists and has files
           if [ ! -d "$RUN_DIR" ] || [ -z "$(ls -A $RUN_DIR)" ]; then
             echo "No split zips found to commit."
             exit 0
@@ -61,17 +98,14 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
-          # Create an orphan branch to prevent repo size from bloating over time
           git checkout --orphan temp_branch
           
-          # Add all existing repo files EXCEPT the newly generated zip parts
           git add -A
           git reset ${RUN_DIR}/* 2>/dev/null || true
           
-          git commit -m "Prepare vault for Job ${{ github.run_id }} [skip ci]"
+          git commit -m "Prepare vault for Job ${{ github.run_id }} [skip ci]" || true
           git -c push.useForceIfIncludes=false push --force origin HEAD:${GITHUB_REF_NAME}
           
-          # Add and commit the 95MB chunks one by one
           for file in ${RUN_DIR}/*; do
             if [ -f "$file" ]; then
               echo "Committing $file..."
@@ -81,6 +115,5 @@ jobs:
             fi
           done
           
-          # Final message rename
           git commit --amend -m "Add Lookism Ch ${CH_START} to ${CH_END} (Run ${{ github.run_id }}) [skip ci]"
           git -c push.useForceIfIncludes=false push --force origin HEAD:${GITHUB_REF_NAME}
