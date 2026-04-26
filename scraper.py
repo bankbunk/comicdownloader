@@ -8,9 +8,9 @@ import concurrent.futures
 import os
 
 # --- CONFIGURATION ---
-COMIC_URL = "https://comix.to/title/emrmx-lookism?group=-2"
+COMIC_URL = "https://comix.to/title/emrmx-lookism?group=-9375"
 START_CHAPTER = 366
-END_CHAPTER = 367  
+END_CHAPTER = 336 
 
 MAX_RETRIES = 5
 OUTPUT_DIR = "CBZ_Files"
@@ -68,7 +68,7 @@ def get_all_chapter_links():
         try:
             page.wait_for_selector(".chap-list a.title", timeout=15000)
         except Exception:
-            print("❌ Failed to find chapter list. Cloudflare might be blocking.")
+            print("❌ Failed to find chapter list.")
             browser.close()
             return []
 
@@ -88,21 +88,17 @@ def get_all_chapter_links():
                         href = "https://comix.to" + href
                     chapter_links.add(href)
 
-            # Look for the pagination Next button using the angle-right icon
             next_locator = page.locator("nav.navigation a.page-link:has(i.fa-angle-right)").first
             if next_locator.count() == 0:
                 break
 
-            # If the parent <li> is disabled, we've reached the end
             li_class = next_locator.evaluate("el => el.parentElement.className")
             if "disabled" in li_class:
                 break
 
-            # Bypass invisible ad overlays by triggering the click directly via Javascript
             next_locator.evaluate("el => el.click()")
             page_num += 1
 
-            # Wait until the DOM updates and the first link on the list changes
             try:
                 page.wait_for_function(
                     f"() => document.querySelector('.chap-list a.title') && document.querySelector('.chap-list a.title').getAttribute('href') !== '{first_href}'",
@@ -115,7 +111,7 @@ def get_all_chapter_links():
         browser.close()
 
     links = list(chapter_links)
-    links.sort(key=extract_chapter_number)  # Sort in ascending order (Ch 1 -> Ch X)
+    links.sort(key=extract_chapter_number)
     return links
 
 def download_image(args):
@@ -126,10 +122,8 @@ def download_image(args):
 
 def process_chapter(chapter_url):
     chapter_num = extract_chapter_number(chapter_url)
-    if START_CHAPTER and chapter_num < START_CHAPTER:
-        return
-    if END_CHAPTER and chapter_num > END_CHAPTER:
-        return
+    if START_CHAPTER and chapter_num < START_CHAPTER: return
+    if END_CHAPTER and chapter_num > END_CHAPTER: return
 
     ch_str = format_chapter_name(chapter_num)
     cbz_filename = os.path.join(OUTPUT_DIR, f"Lookism_Chapter_{ch_str}.cbz")
@@ -143,14 +137,21 @@ def process_chapter(chapter_url):
         print(f"❌ Failed to fetch HTML for Chapter {ch_str}.")
         return
 
-    soup = BeautifulSoup(html_content, "html.parser")
-    images = soup.select(".read-viewer .page img")
-
     image_urls = []
-    for img in images:
-        img_url = img.get("data-src") or img.get("src")
-        if img_url:
-            image_urls.append(img_url.strip())
+
+    # 1. Extract from Next.js payload (Regex)
+    images_block_match = re.search(r'(?:\\"|")images(?:\\"|"):\s*\[(.*?)\]', html_content)
+    if images_block_match:
+        extracted_urls = re.findall(r'(?:\\"|")url(?:\\"|"):\s*(?:\\"|")(https?://.*?)(?:\\"|")', images_block_match.group(1))
+        image_urls = [u.replace('\\/', '/') for u in extracted_urls]
+
+    # 2. Fallback to BeautifulSoup if it was server-side rendered normally
+    if not image_urls:
+        soup = BeautifulSoup(html_content, "html.parser")
+        for img in soup.select(".read-viewer .page img, .read-viewer img"):
+            src = img.get("data-src") or img.get("src")
+            if src:
+                image_urls.append(src.strip())
 
     if not image_urls:
         print(f"❌ No images found for Chapter {ch_str}.")
@@ -178,12 +179,9 @@ def main():
     links_to_process = []
     for link in all_links:
         cnum = extract_chapter_number(link)
-        if cnum < 0:
-            continue
-        if START_CHAPTER and cnum < START_CHAPTER:
-            continue
-        if END_CHAPTER and cnum > END_CHAPTER:
-            continue
+        if cnum < 0: continue
+        if START_CHAPTER and cnum < START_CHAPTER: continue
+        if END_CHAPTER and cnum > END_CHAPTER: continue
         links_to_process.append(link)
 
     print(f"🚀 Chapters to process after filtering: {len(links_to_process)}\n")
