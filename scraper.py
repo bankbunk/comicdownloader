@@ -8,9 +8,9 @@ import concurrent.futures
 import os
 
 # --- CONFIGURATION ---
-COMIC_URL = "https://comix.to/title/emrmx-lookism?group=9375"
-START_CHAPTER = 451
-END_CHAPTER = None  
+COMIC_URL = "https://comix.to/title/emrmx-lookism?group=-2"
+START_CHAPTER = 366
+END_CHAPTER = 500  
 
 MAX_RETRIES = 5
 OUTPUT_DIR = "CBZ_Files"
