@@ -1,7 +1,6 @@
 from curl_cffi import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth_sync
 import time
 import re
 import zipfile
@@ -19,8 +18,10 @@ OUTPUT_DIR = "CBZ_Files"
 MAX_CONCURRENT_CHAPTERS = 3
 MAX_THREADS_PER_CHAPTER = 5
 
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 HTML_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": USER_AGENT
 }
 
 def fetch_url(url, is_image=False):
@@ -60,8 +61,8 @@ def get_all_chapter_links():
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        stealth_sync(page)
+        context = browser.new_context(user_agent=USER_AGENT)
+        page = context.new_page()
 
         page.goto(COMIC_URL, wait_until="domcontentloaded")
         try:
