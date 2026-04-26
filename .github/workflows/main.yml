@@ -1,0 +1,57 @@
+name: Download Manga
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scrape-and-pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 curl-cffi playwright playwright-stealth
+          playwright install chromium
+
+      - name: Run Scraper
+        run: python -u scraper.py
+
+      - name: Zip into safe 150-chapter chunks (Bypass 2GB Limit)
+        run: |
+          mkdir -p Release_Zips
+          cd CBZ_Files
+          
+          # Enable nullglob so files array is empty if no .cbz exist
+          shopt -s nullglob
+          files=( *.cbz )
+          
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No CBZ files found to zip. Exiting."
+            exit 0
+          fi
+          
+          chunk_size=150
+          for (( i=0; i<${#files[@]}; i+=chunk_size )); do
+            part=$(printf "%02d" $((i/chunk_size + 1)))
+            # -0 means "store" (don't recompress already compressed files)
+            zip -0 ../Release_Zips/Lookism_Part_${part}.zip "${files[@]:i:chunk_size}"
+          done
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: download-${{ github.run_id }}
+          name: "Lookism Download - Run ${{ github.run_number }}"
+          body: "Automated manga download from Comix.to. Split into parts to bypass GitHub's 2GB file limit."
+          files: Release_Zips/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
