@@ -98,7 +98,8 @@ def get_all_chapter_links():
             if "disabled" in li_class:
                 break
 
-            next_locator.click()
+            # Bypass invisible ad overlays by triggering the click directly via Javascript
+            next_locator.evaluate("el => el.click()")
             page_num += 1
 
             # Wait until the DOM updates and the first link on the list changes
