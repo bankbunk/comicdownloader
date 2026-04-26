@@ -21,7 +21,7 @@ jobs:
         run: pip install requests beautifulsoup4 curl-cffi
 
       - name: Run Scraper
-        run: python -u scraper.py
+        run: python -u scraper-manhwatop.py
 
       - name: Zip into safe 150-chapter chunks (Bypass 2GB Limit)
         run: |
