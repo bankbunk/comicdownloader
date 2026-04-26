@@ -9,8 +9,8 @@ import os
 
 # --- CONFIGURATION ---
 COMIC_URL = "https://comix.to/title/emrmx-lookism?group=9375"
-START_CHAPTER = 366
-END_CHAPTER = 475  
+START_CHAPTER = 476
+END_CHAPTER = 592  
 
 MAX_RETRIES = 5
 OUTPUT_DIR = "CBZ_Files"
