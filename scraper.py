@@ -13,6 +13,7 @@ START_CHAPTER = 476
 END_CHAPTER = 592  
 
 MAX_RETRIES = 5
+MAX_CHAPTER_RETRIES = 3
 OUTPUT_DIR = "CBZ_Files"
 
 MAX_CONCURRENT_CHAPTERS = 3
@@ -163,17 +164,29 @@ def process_chapter(chapter_url):
         return
 
     image_tasks = [(idx + 1, url) for idx, url in enumerate(image_urls)]
-    successful_pages = 0
 
-    with zipfile.ZipFile(cbz_filename, 'w', zipfile.ZIP_STORED) as cbz_file:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS_PER_CHAPTER) as executor:
-            for idx, ext, img_data in executor.map(download_image, image_tasks):
-                if img_data:
-                    filename = f"Page_{idx:03d}{ext}"
-                    cbz_file.writestr(filename, img_data)
-                    successful_pages += 1
-                    
-    print(f"✅ Chapter {ch_str} successfully downloaded & zipped! ({successful_pages}/{len(image_urls)} pages)")
+    for attempt in range(1, MAX_CHAPTER_RETRIES + 1):
+        successful_pages = 0
+
+        with zipfile.ZipFile(cbz_filename, 'w', zipfile.ZIP_STORED) as cbz_file:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS_PER_CHAPTER) as executor:
+                for idx, ext, img_data in executor.map(download_image, image_tasks):
+                    if img_data:
+                        filename = f"Page_{idx:03d}{ext}"
+                        cbz_file.writestr(filename, img_data)
+                        successful_pages += 1
+                        
+        if successful_pages == len(image_urls):
+            print(f"✅ Chapter {ch_str} successfully downloaded & zipped! ({successful_pages}/{len(image_urls)} pages)")
+            return
+        else:
+            print(f"⚠️ Chapter {ch_str} incomplete ({successful_pages}/{len(image_urls)} pages). Attempt {attempt}/{MAX_CHAPTER_RETRIES}.")
+            if os.path.exists(cbz_filename):
+                os.remove(cbz_filename) # Delete corrupted zip
+            if attempt < MAX_CHAPTER_RETRIES:
+                time.sleep(5) # Delay before retrying the entire chapter
+
+    print(f"❌ Chapter {ch_str} failed to fully download after {MAX_CHAPTER_RETRIES} attempts.")
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -209,8 +222,14 @@ def main():
         print("🛑 No chapters in the defined range to download.")
         return
 
+    # Process chapters with a 1-second delay between starting each
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CHAPTERS) as executor:
-        executor.map(process_chapter, links_to_process)
+        futures = []
+        for link in links_to_process:
+            futures.append(executor.submit(process_chapter, link))
+            time.sleep(1)  # 1-second delay to avoid rate limits
+            
+        concurrent.futures.wait(futures)
 
     print("\n🎉 All done! Ready for GitHub to zip the files.")
 
