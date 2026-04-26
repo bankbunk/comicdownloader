@@ -37,7 +37,7 @@ jobs:
       - name: Run Scraper
         run: python -u scraper.py
 
-      - name: Zip for Release (OG Method - 150 Chapters/Zip)
+      - name: Zip for Release (Smart Size Calculation - 1.9GB max)
         if: github.event.inputs.storage_mode == 'release'
         run: |
           mkdir -p Release_Zips
@@ -51,11 +51,36 @@ jobs:
             exit 0
           fi
           
-          chunk_size=150
-          for (( i=0; i<${#files[@]}; i+=chunk_size )); do
-            part=$(printf "%02d" $((i/chunk_size + 1)))
-            zip -0 ../Release_Zips/Lookism_Ch_${CH_START}_to_${CH_END}_Part_${part}.zip "${files[@]:i:chunk_size}"
+          # Max size per zip: 1.9 GB (in bytes) to safely stay under GitHub's 2GB (2147483648 bytes) limit
+          MAX_SIZE=$(( 1900 * 1024 * 1024 ))
+          current_size=0
+          part=1
+          files_to_zip=()
+          
+          for file in "${files[@]}"; do
+            file_size=$(stat -c%s "$file")
+            
+            # If adding this file exceeds the limit, package the current batch and reset
+            if (( current_size + file_size > MAX_SIZE )) && (( ${#files_to_zip[@]} > 0 )); then
+              part_formatted=$(printf "%02d" $part)
+              echo "Packing Part ${part_formatted} (Size: $((current_size / 1024 / 1024)) MB)..."
+              zip -0 "../Release_Zips/Lookism_Ch_${CH_START}_to_${CH_END}_Part_${part_formatted}.zip" "${files_to_zip[@]}"
+              
+              part=$((part + 1))
+              current_size=0
+              files_to_zip=()
+            fi
+            
+            files_to_zip+=("$file")
+            current_size=$((current_size + file_size))
           done
+          
+          # Zip any remaining files
+          if (( ${#files_to_zip[@]} > 0 )); then
+            part_formatted=$(printf "%02d" $part)
+            echo "Packing Part ${part_formatted} (Size: $((current_size / 1024 / 1024)) MB)..."
+            zip -0 "../Release_Zips/Lookism_Ch_${CH_START}_to_${CH_END}_Part_${part_formatted}.zip" "${files_to_zip[@]}"
+          fi
 
       - name: Create Release
         if: github.event.inputs.storage_mode == 'release'
@@ -63,7 +88,7 @@ jobs:
         with:
           tag_name: download-${{ github.run_id }}
           name: "Lookism Download (Ch ${{ env.CH_START }} - ${{ env.CH_END }}) - Run ${{ github.run_number }}"
-          body: "Automated manga download from Comix.to. Split into parts to bypass GitHub's 2GB file limit."
+          body: "Automated manga download from Comix.to. Files packed dynamically to stay exactly under the 2GB limit."
           files: Release_Zips/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
