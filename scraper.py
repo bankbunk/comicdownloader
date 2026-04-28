@@ -8,9 +8,9 @@ import concurrent.futures
 import os
 
 # --- CONFIGURATION ---
-COMIC_URL = "https://comix.to/title/emrmx-lookism?group=9300"
-START_CHAPTER = 592
-END_CHAPTER = 604  
+COMIC_URL = "https://comix.to/title/emrmx-lookism?group=9375"
+START_CHAPTER = 1
+END_CHAPTER = 40  
 
 MAX_RETRIES = 6
 MAX_CHAPTER_RETRIES = 6
