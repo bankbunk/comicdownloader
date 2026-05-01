@@ -94,7 +94,8 @@ def get_all_chapter_links():
                         href = "https://comix.to" + href
                     chapter_links.add(href)
 
-            next_locator = page.locator("nav.navigation a.page-link:has(i.fa-angle-right)").first
+            # Updated locator to catch both desktop & mobile NEXT buttons
+            next_locator = page.locator("a.page-link:has-text('Next'), a.page-link:has(i.fa-angle-right), a.page-link:has(i.fa-arrow-right-long)").first
             if next_locator.count() == 0:
                 break
 
