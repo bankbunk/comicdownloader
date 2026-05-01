@@ -10,7 +10,7 @@ import os
 # --- CONFIGURATION ---
 COMIC_URL = "https://comix.to/title/8wgym-the-greatest-estate-developer?group=9375"
 START_CHAPTER = 1
-END_CHAPTER = 100  
+END_CHAPTER = None  
 
 MAX_RETRIES = 6
 MAX_CHAPTER_RETRIES = 6
@@ -61,8 +61,12 @@ def clean_num(num):
         return str(int(num))
     return str(num)
 
+def sanitize_filename(name):
+    return re.sub(r'[\\/*?:"<>|]', "", name).strip()
+
 def get_all_chapter_links():
     chapter_links = set()
+    comic_title = "Comic"
     print("🤖 Starting Playwright to dynamically extract chapter URLs...")
     
     with sync_playwright() as p:
@@ -73,10 +77,15 @@ def get_all_chapter_links():
         page.goto(COMIC_URL, wait_until="domcontentloaded")
         try:
             page.wait_for_selector(".chap-list a.title", timeout=15000)
+            
+            # Extract comic title dynamically
+            title_locator = page.locator("h1.title")
+            if title_locator.count() > 0:
+                comic_title = title_locator.first.inner_text().strip()
         except Exception:
-            print("❌ Failed to find chapter list.")
+            print("❌ Failed to find chapter list or title.")
             browser.close()
-            return []
+            return comic_title, []
 
         page_num = 1
         while True:
@@ -94,7 +103,6 @@ def get_all_chapter_links():
                         href = "https://comix.to" + href
                     chapter_links.add(href)
 
-            # Updated locator to catch both desktop & mobile NEXT buttons
             next_locator = page.locator("a.page-link:has-text('Next'), a.page-link:has(i.fa-angle-right), a.page-link:has(i.fa-arrow-right-long)").first
             if next_locator.count() == 0:
                 break
@@ -119,7 +127,7 @@ def get_all_chapter_links():
 
     links = list(chapter_links)
     links.sort(key=extract_chapter_number)
-    return links
+    return comic_title, links
 
 def download_image(args):
     idx, img_url = args
@@ -127,13 +135,14 @@ def download_image(args):
     ext = ".png" if ".png" in img_url.lower() else ".webp" if ".webp" in img_url.lower() else ".jpg"
     return idx, ext, img_data
 
-def process_chapter(chapter_url):
+def process_chapter(chapter_url, comic_title):
     chapter_num = extract_chapter_number(chapter_url)
     if START_CHAPTER and chapter_num < START_CHAPTER: return
     if END_CHAPTER and chapter_num > END_CHAPTER: return
 
     ch_str = format_chapter_name(chapter_num)
-    cbz_filename = os.path.join(OUTPUT_DIR, f"Lookism_Chapter_{ch_str}.cbz")
+    sanitized_title = sanitize_filename(comic_title)
+    cbz_filename = os.path.join(OUTPUT_DIR, f"{sanitized_title}_Chapter_{ch_str}.cbz")
 
     if os.path.exists(cbz_filename):
         print(f"⏭️ Chapter {ch_str} already exists. Skipping.")
@@ -152,7 +161,7 @@ def process_chapter(chapter_url):
         extracted_urls = re.findall(r'(?:\\"|")url(?:\\"|"):\s*(?:\\"|")(https?://.*?)(?:\\"|")', images_block_match.group(1))
         image_urls = [u.replace('\\/', '/') for u in extracted_urls]
 
-    # 2. Fallback to BeautifulSoup if it was server-side rendered normally
+    # 2. Fallback to BeautifulSoup
     if not image_urls:
         soup = BeautifulSoup(html_content, "html.parser")
         for img in soup.select(".read-viewer .page img, .read-viewer img"):
@@ -164,36 +173,47 @@ def process_chapter(chapter_url):
         print(f"❌ No images found for Chapter {ch_str}.")
         return
 
-    image_tasks = [(idx + 1, url) for idx, url in enumerate(image_urls)]
+    pending_tasks = [(idx + 1, url) for idx, url in enumerate(image_urls)]
+    downloaded_images = {}
 
     for attempt in range(1, MAX_CHAPTER_RETRIES + 1):
-        successful_pages = 0
+        if not pending_tasks:
+            break
 
-        with zipfile.ZipFile(cbz_filename, 'w', zipfile.ZIP_STORED) as cbz_file:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS_PER_CHAPTER) as executor:
-                for idx, ext, img_data in executor.map(download_image, image_tasks):
-                    if img_data:
-                        filename = f"Page_{idx:03d}{ext}"
-                        cbz_file.writestr(filename, img_data)
-                        successful_pages += 1
-                        
-        if successful_pages == len(image_urls):
-            print(f"✅ Chapter {ch_str} successfully downloaded & zipped! ({successful_pages}/{len(image_urls)} pages)")
-            return
-        else:
-            print(f"⚠️ Chapter {ch_str} incomplete ({successful_pages}/{len(image_urls)} pages). Attempt {attempt}/{MAX_CHAPTER_RETRIES}.")
-            if os.path.exists(cbz_filename):
-                os.remove(cbz_filename) # Delete corrupted zip
-            if attempt < MAX_CHAPTER_RETRIES:
-                time.sleep(5) # Delay before retrying the entire chapter
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS_PER_CHAPTER) as executor:
+            for idx, ext, img_data in executor.map(download_image, pending_tasks):
+                if img_data:
+                    downloaded_images[idx] = (ext, img_data)
 
-    print(f"❌ Chapter {ch_str} failed to fully download after {MAX_CHAPTER_RETRIES} attempts.")
+        # Re-evaluate pending tasks based on what failed
+        pending_tasks = [(idx + 1, url) for idx, url in enumerate(image_urls) if (idx + 1) not in downloaded_images]
+
+        if pending_tasks and attempt < MAX_CHAPTER_RETRIES:
+            print(f"⚠️ Chapter {ch_str} missing {len(pending_tasks)} images. Retrying attempt {attempt + 1}/{MAX_CHAPTER_RETRIES}...")
+            time.sleep(3)
+
+    if not downloaded_images:
+        print(f"❌ Chapter {ch_str} failed to download entirely.")
+        return
+
+    # Write successfully downloaded images to ZIP
+    with zipfile.ZipFile(cbz_filename, 'w', zipfile.ZIP_STORED) as cbz_file:
+        for idx in sorted(downloaded_images.keys()):
+            ext, img_data = downloaded_images[idx]
+            filename = f"Page_{idx:03d}{ext}"
+            cbz_file.writestr(filename, img_data)
+
+    if len(downloaded_images) == len(image_urls):
+        print(f"✅ Chapter {ch_str} successfully downloaded & zipped! ({len(downloaded_images)}/{len(image_urls)} pages)")
+    else:
+        print(f"⚠️ Chapter {ch_str} partially downloaded & zipped! ({len(downloaded_images)}/{len(image_urls)} pages)")
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    all_links = get_all_chapter_links()
-    print(f"\n🔍 Total unique chapters found: {len(all_links)}")
+    comic_title, all_links = get_all_chapter_links()
+    print(f"\n📚 Title: {comic_title}")
+    print(f"🔍 Total unique chapters found: {len(all_links)}")
 
     links_to_process = []
     for link in all_links:
@@ -205,7 +225,6 @@ def main():
 
     print(f"🚀 Chapters to process after filtering: {len(links_to_process)}\n")
 
-    # Export start/end variables for GitHub Actions
     if links_to_process:
         actual_start = min([extract_chapter_number(u) for u in links_to_process])
         actual_end = max([extract_chapter_number(u) for u in links_to_process])
@@ -223,12 +242,11 @@ def main():
         print("🛑 No chapters in the defined range to download.")
         return
 
-    # Process chapters with a 1-second delay between starting each
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CHAPTERS) as executor:
         futures = []
         for link in links_to_process:
-            futures.append(executor.submit(process_chapter, link))
-            time.sleep(1)  # 1-second delay to avoid rate limits
+            futures.append(executor.submit(process_chapter, link, comic_title))
+            time.sleep(1)
             
         concurrent.futures.wait(futures)
 
