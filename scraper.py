@@ -237,6 +237,7 @@ def main():
         with open(env_file, "a") as f:
             f.write(f"CH_START={clean_num(actual_start)}\n")
             f.write(f"CH_END={clean_num(actual_end)}\n")
+            f.write(f"COMIC_TITLE={sanitize_filename(comic_title)}\n")
 
     if not links_to_process:
         print("🛑 No chapters in the defined range to download.")
