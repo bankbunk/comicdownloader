@@ -64,7 +64,7 @@ jobs:
             if (( current_size + file_size > MAX_SIZE )) && (( ${#files_to_zip[@]} > 0 )); then
               part_formatted=$(printf "%02d" $part)
               echo "Packing Part ${part_formatted} (Size: $((current_size / 1024 / 1024)) MB)..."
-              zip -0 "../Release_Zips/Lookism_Ch_${CH_START}_to_${CH_END}_Part_${part_formatted}.zip" "${files_to_zip[@]}"
+              zip -0 "../Release_Zips/${COMIC_TITLE}_Ch_${CH_START}_to_${CH_END}_Part_${part_formatted}.zip" "${files_to_zip[@]}"
               
               part=$((part + 1))
               current_size=0
@@ -79,7 +79,7 @@ jobs:
           if (( ${#files_to_zip[@]} > 0 )); then
             part_formatted=$(printf "%02d" $part)
             echo "Packing Part ${part_formatted} (Size: $((current_size / 1024 / 1024)) MB)..."
-            zip -0 "../Release_Zips/Lookism_Ch_${CH_START}_to_${CH_END}_Part_${part_formatted}.zip" "${files_to_zip[@]}"
+            zip -0 "../Release_Zips/${COMIC_TITLE}_Ch_${CH_START}_to_${CH_END}_Part_${part_formatted}.zip" "${files_to_zip[@]}"
           fi
 
       - name: Create Release
@@ -87,7 +87,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: download-${{ github.run_id }}
-          name: "Lookism Download (Ch ${{ env.CH_START }} - ${{ env.CH_END }}) - Run ${{ github.run_number }}"
+          name: "${{ env.COMIC_TITLE }} Download (Ch ${{ env.CH_START }} - ${{ env.CH_END }}) - Run ${{ github.run_number }}"
           body: "Automated manga download from Comix.to. Files packed dynamically to stay exactly under the 2GB limit."
           files: Release_Zips/*.zip
         env:
@@ -108,7 +108,7 @@ jobs:
             exit 0
           fi
           
-          zip -0 -s 95m "../$RUN_DIR/Lookism_${CH_START}_to_${CH_END}.zip" *.cbz
+          zip -0 -s 95m "../$RUN_DIR/${COMIC_TITLE}_${CH_START}_to_${CH_END}.zip" *.cbz
 
       - name: Commit and Force Push
         if: github.event.inputs.storage_mode == 'repo'
@@ -140,5 +140,5 @@ jobs:
             fi
           done
           
-          git commit --amend -m "Add Lookism Ch ${CH_START} to ${CH_END} (Run ${{ github.run_id }}) [skip ci]"
+          git commit --amend -m "Add ${COMIC_TITLE} Ch ${CH_START} to ${CH_END} (Run ${{ github.run_id }}) [skip ci]"
           git -c push.useForceIfIncludes=false push --force origin HEAD:${GITHUB_REF_NAME}
