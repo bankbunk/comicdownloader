@@ -8,7 +8,7 @@ import concurrent.futures
 import os
 
 # --- CONFIGURATION ---
-COMIC_URL = "https://comix.to/title/8wgym-the-greatest-estate-developer?group=9375"
+COMIC_URL = "https://comix.to/title/kl2e-tomb-raider-king?group=-2"
 START_CHAPTER = 1
 END_CHAPTER = None  
 
