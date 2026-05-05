@@ -15,13 +15,13 @@ permissions:
   contents: write
 
 jobs:
-  scrape-and-pack:
+  generate-chunks:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -32,10 +32,62 @@ jobs:
         run: |
           pip install requests beautifulsoup4 curl-cffi playwright
           playwright install chromium
+
+      - name: Run Scraper (Generate Chunks)
+        id: set-matrix
+        run: python -u scraper.py --mode generate
+
+      - name: Upload Metadata Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-metadata
+          path: |
+            chapters.txt
+            comic_info.env
+          retention-days: 1
+
+      - name: Pre-create Release
+        if: github.event.inputs.storage_mode == 'release' && steps.set-matrix.outputs.matrix != '{"include":[]}'
+        run: |
+          source comic_info.env
+          gh release create "download-${{ github.run_id }}" \
+            --title "${COMIC_TITLE} Download (Ch ${CH_START} - ${CH_END}) - Run ${{ github.run_number }}" \
+            --notes "Automated manga download split across runners. Files packed dynamically."
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  download-and-pack:
+    needs: generate-chunks
+    if: needs.generate-chunks.outputs.matrix != '{"include":[]}'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.generate-chunks.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 10
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 curl-cffi
           sudo apt-get install -y zip
 
-      - name: Run Scraper
-        run: python -u scraper.py
+      - name: Download Metadata Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: scraper-metadata
+
+      - name: Load Environment Variables
+        run: cat comic_info.env >> $GITHUB_ENV
+
+      - name: Run Scraper (Download Chunk)
+        run: python -u scraper.py --mode download --start-idx ${{ matrix.start }} --end-idx ${{ matrix.end }}
 
       - name: Zip for Release (Smart Size Calculation - 1.9GB max)
         if: github.event.inputs.storage_mode == 'release'
@@ -51,7 +103,6 @@ jobs:
             exit 0
           fi
           
-          # Max size per zip: 1.9 GB (in bytes) to safely stay under GitHub's 2GB (2147483648 bytes) limit
           MAX_SIZE=$(( 1900 * 1024 * 1024 ))
           current_size=0
           part=1
@@ -60,11 +111,10 @@ jobs:
           for file in "${files[@]}"; do
             file_size=$(stat -c%s "$file")
             
-            # If adding this file exceeds the limit, package the current batch and reset
             if (( current_size + file_size > MAX_SIZE )) && (( ${#files_to_zip[@]} > 0 )); then
               part_formatted=$(printf "%02d" $part)
-              echo "Packing Part ${part_formatted} (Size: $((current_size / 1024 / 1024)) MB)..."
-              zip -0 "../Release_Zips/${COMIC_TITLE}_Ch_${CH_START}_to_${CH_END}_Part_${part_formatted}.zip" "${files_to_zip[@]}"
+              echo "Packing Chunk ${{ matrix.start }} Part ${part_formatted}..."
+              zip -0 "../Release_Zips/${COMIC_TITLE}_Ch_${CH_START}_to_${CH_END}_Chunk_${{ matrix.start }}_Part_${part_formatted}.zip" "${files_to_zip[@]}"
               
               part=$((part + 1))
               current_size=0
@@ -75,28 +125,27 @@ jobs:
             current_size=$((current_size + file_size))
           done
           
-          # Zip any remaining files
           if (( ${#files_to_zip[@]} > 0 )); then
             part_formatted=$(printf "%02d" $part)
-            echo "Packing Part ${part_formatted} (Size: $((current_size / 1024 / 1024)) MB)..."
-            zip -0 "../Release_Zips/${COMIC_TITLE}_Ch_${CH_START}_to_${CH_END}_Part_${part_formatted}.zip" "${files_to_zip[@]}"
+            echo "Packing Chunk ${{ matrix.start }} Part ${part_formatted}..."
+            zip -0 "../Release_Zips/${COMIC_TITLE}_Ch_${CH_START}_to_${CH_END}_Chunk_${{ matrix.start }}_Part_${part_formatted}.zip" "${files_to_zip[@]}"
           fi
 
-      - name: Create Release
+      - name: Upload to Release
         if: github.event.inputs.storage_mode == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: download-${{ github.run_id }}
-          name: "${{ env.COMIC_TITLE }} Download (Ch ${{ env.CH_START }} - ${{ env.CH_END }}) - Run ${{ github.run_number }}"
-          body: "Automated manga download from Comix.to. Files packed dynamically to stay exactly under the 2GB limit."
-          files: Release_Zips/*.zip
+        run: |
+          shopt -s nullglob
+          zips=(Release_Zips/*.zip)
+          if [ ${#zips[@]} -gt 0 ]; then
+            gh release upload "download-${{ github.run_id }}" Release_Zips/*.zip
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Zip for Repo (95MB chunks)
         if: github.event.inputs.storage_mode == 'repo'
         run: |
-          RUN_DIR="downloads/run_${{ github.run_id }}_${CH_START}_to_${CH_END}"
+          RUN_DIR="downloads/run_${{ github.run_id }}_chunk_${{ matrix.start }}"
           mkdir -p "$RUN_DIR"
           cd CBZ_Files
           
@@ -108,12 +157,12 @@ jobs:
             exit 0
           fi
           
-          zip -0 -s 95m "../$RUN_DIR/${COMIC_TITLE}_${CH_START}_to_${CH_END}.zip" *.cbz
+          zip -0 -s 95m "../$RUN_DIR/${COMIC_TITLE}_Chunk_${{ matrix.start }}.zip" *.cbz
 
       - name: Commit and Force Push
         if: github.event.inputs.storage_mode == 'repo'
         run: |
-          RUN_DIR="downloads/run_${{ github.run_id }}_${CH_START}_to_${CH_END}"
+          RUN_DIR="downloads/run_${{ github.run_id }}_chunk_${{ matrix.start }}"
           
           if [ ! -d "$RUN_DIR" ] || [ -z "$(ls -A $RUN_DIR)" ]; then
             echo "No split zips found to commit."
@@ -123,22 +172,25 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
-          git checkout --orphan temp_branch
+          git checkout --orphan "temp_branch_${{ matrix.start }}"
           
           git add -A
           git reset ${RUN_DIR}/* 2>/dev/null || true
           
-          git commit -m "Prepare vault for Job ${{ github.run_id }} [skip ci]" || true
-          git -c push.useForceIfIncludes=false push --force origin HEAD:${GITHUB_REF_NAME}
+          # Force pushing to a branch named after the chunk index to avoid conflict with other runners
+          TARGET_BRANCH="${GITHUB_REF_NAME}_chunk_${{ matrix.start }}"
+          
+          git commit -m "Prepare vault for Job ${{ github.run_id }} Chunk ${{ matrix.start }} [skip ci]" || true
+          git -c push.useForceIfIncludes=false push --force origin "HEAD:${TARGET_BRANCH}"
           
           for file in ${RUN_DIR}/*; do
             if [ -f "$file" ]; then
               echo "Committing $file..."
               git add "$file"
               git commit --amend --no-edit
-              git -c push.useForceIfIncludes=false push --force origin HEAD:${GITHUB_REF_NAME}
+              git -c push.useForceIfIncludes=false push --force origin "HEAD:${TARGET_BRANCH}"
             fi
           done
           
-          git commit --amend -m "Add ${COMIC_TITLE} Ch ${CH_START} to ${CH_END} (Run ${{ github.run_id }}) [skip ci]"
-          git -c push.useForceIfIncludes=false push --force origin HEAD:${GITHUB_REF_NAME}
+          git commit --amend -m "Add ${COMIC_TITLE} Chunk ${{ matrix.start }} (Run ${{ github.run_id }}) [skip ci]"
+          git -c push.useForceIfIncludes=false push --force origin "HEAD:${TARGET_BRANCH}"
