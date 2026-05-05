@@ -46,12 +46,15 @@ jobs:
             comic_info.env
           retention-days: 1
 
+      - name: Load Env Variables
+        if: github.event.inputs.storage_mode == 'release' && steps.set-matrix.outputs.matrix != '{"include":[]}'
+        run: cat comic_info.env >> $GITHUB_ENV
+
       - name: Pre-create Release
         if: github.event.inputs.storage_mode == 'release' && steps.set-matrix.outputs.matrix != '{"include":[]}'
         run: |
-          source comic_info.env
           gh release create "download-${{ github.run_id }}" \
-            --title "${COMIC_TITLE} Download (Ch ${CH_START} - ${CH_END}) - Run ${{ github.run_number }}" \
+            --title "${{ env.COMIC_TITLE }} Download (Ch ${{ env.CH_START }} - ${{ env.CH_END }}) - Run ${{ github.run_number }}" \
             --notes "Automated manga download split across runners. Files packed dynamically."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -179,7 +182,6 @@ jobs:
           git add -A
           git reset ${RUN_DIR}/* 2>/dev/null || true
           
-          # Force pushing to a branch named after the chunk index to avoid conflict with other runners
           TARGET_BRANCH="${GITHUB_REF_NAME}_chunk_${{ matrix.start }}"
           
           git commit -m "Prepare vault for Job ${{ github.run_id }} Chunk ${{ matrix.start }} [skip ci]" || true
