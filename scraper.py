@@ -1,3 +1,5 @@
+import argparse
+import json
 from curl_cffi import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
@@ -9,8 +11,8 @@ import os
 
 # --- CONFIGURATION ---
 COMIC_URL = "https://comix.to/title/kl2e-tomb-raider-king?group=-2"
-START_CHAPTER = 291
-END_CHAPTER = None  
+START_CHAPTER = 141
+END_CHAPTER = 290  
 
 MAX_RETRIES = 6
 MAX_CHAPTER_RETRIES = 6
@@ -77,8 +79,6 @@ def get_all_chapter_links():
         page.goto(COMIC_URL, wait_until="domcontentloaded")
         try:
             page.wait_for_selector(".chap-list a.title", timeout=15000)
-            
-            # Extract comic title dynamically
             title_locator = page.locator("h1.title")
             if title_locator.count() > 0:
                 comic_title = title_locator.first.inner_text().strip()
@@ -137,9 +137,6 @@ def download_image(args):
 
 def process_chapter(chapter_url, comic_title):
     chapter_num = extract_chapter_number(chapter_url)
-    if START_CHAPTER and chapter_num < START_CHAPTER: return
-    if END_CHAPTER and chapter_num > END_CHAPTER: return
-
     ch_str = format_chapter_name(chapter_num)
     sanitized_title = sanitize_filename(comic_title)
     cbz_filename = os.path.join(OUTPUT_DIR, f"{sanitized_title}_Chapter_{ch_str}.cbz")
@@ -155,13 +152,11 @@ def process_chapter(chapter_url, comic_title):
 
     image_urls = []
 
-    # 1. Extract from Next.js payload (Regex)
     images_block_match = re.search(r'(?:\\"|")images(?:\\"|"):\s*\[(.*?)\]', html_content)
     if images_block_match:
         extracted_urls = re.findall(r'(?:\\"|")url(?:\\"|"):\s*(?:\\"|")(https?://.*?)(?:\\"|")', images_block_match.group(1))
         image_urls = [u.replace('\\/', '/') for u in extracted_urls]
 
-    # 2. Fallback to BeautifulSoup
     if not image_urls:
         soup = BeautifulSoup(html_content, "html.parser")
         for img in soup.select(".read-viewer .page img, .read-viewer img"):
@@ -185,7 +180,6 @@ def process_chapter(chapter_url, comic_title):
                 if img_data:
                     downloaded_images[idx] = (ext, img_data)
 
-        # Re-evaluate pending tasks based on what failed
         pending_tasks = [(idx + 1, url) for idx, url in enumerate(image_urls) if (idx + 1) not in downloaded_images]
 
         if pending_tasks and attempt < MAX_CHAPTER_RETRIES:
@@ -196,7 +190,6 @@ def process_chapter(chapter_url, comic_title):
         print(f"❌ Chapter {ch_str} failed to download entirely.")
         return
 
-    # Write successfully downloaded images to ZIP
     with zipfile.ZipFile(cbz_filename, 'w', zipfile.ZIP_STORED) as cbz_file:
         for idx in sorted(downloaded_images.keys()):
             ext, img_data = downloaded_images[idx]
@@ -209,49 +202,88 @@ def process_chapter(chapter_url, comic_title):
         print(f"⚠️ Chapter {ch_str} partially downloaded & zipped! ({len(downloaded_images)}/{len(image_urls)} pages)")
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["generate", "download"], default="generate")
+    parser.add_argument("--start-idx", type=int, default=0)
+    parser.add_argument("--end-idx", type=int, default=100)
+    args = parser.parse_args()
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
-    comic_title, all_links = get_all_chapter_links()
-    print(f"\n📚 Title: {comic_title}")
-    print(f"🔍 Total unique chapters found: {len(all_links)}")
 
-    links_to_process = []
-    for link in all_links:
-        cnum = extract_chapter_number(link)
-        if cnum < 0: continue
-        if START_CHAPTER and cnum < START_CHAPTER: continue
-        if END_CHAPTER and cnum > END_CHAPTER: continue
-        links_to_process.append(link)
+    if args.mode == "generate":
+        comic_title, all_links = get_all_chapter_links()
+        print(f"\n📚 Title: {comic_title}")
+        print(f"🔍 Total unique chapters found: {len(all_links)}")
 
-    print(f"🚀 Chapters to process after filtering: {len(links_to_process)}\n")
+        links_to_process = []
+        for link in all_links:
+            cnum = extract_chapter_number(link)
+            if cnum < 0: continue
+            if START_CHAPTER and cnum < START_CHAPTER: continue
+            if END_CHAPTER and cnum > END_CHAPTER: continue
+            links_to_process.append(link)
 
-    if links_to_process:
-        actual_start = min([extract_chapter_number(u) for u in links_to_process])
-        actual_end = max([extract_chapter_number(u) for u in links_to_process])
-    else:
-        actual_start = START_CHAPTER or 1
-        actual_end = END_CHAPTER or "latest"
+        print(f"🚀 Chapters to process after filtering: {len(links_to_process)}\n")
 
-    env_file = os.getenv('GITHUB_ENV')
-    if env_file:
-        with open(env_file, "a") as f:
+        if links_to_process:
+            actual_start = min([extract_chapter_number(u) for u in links_to_process])
+            actual_end = max([extract_chapter_number(u) for u in links_to_process])
+        else:
+            actual_start = START_CHAPTER or 1
+            actual_end = END_CHAPTER or "latest"
+
+        with open("comic_info.env", "w") as f:
+            f.write(f"COMIC_TITLE={sanitize_filename(comic_title)}\n")
             f.write(f"CH_START={clean_num(actual_start)}\n")
             f.write(f"CH_END={clean_num(actual_end)}\n")
-            f.write(f"COMIC_TITLE={sanitize_filename(comic_title)}\n")
 
-    if not links_to_process:
-        print("🛑 No chapters in the defined range to download.")
-        return
+        with open("chapters.txt", "w") as f:
+            for link in links_to_process:
+                f.write(f"{link}\n")
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CHAPTERS) as executor:
-        futures = []
-        for link in links_to_process:
-            futures.append(executor.submit(process_chapter, link, comic_title))
-            time.sleep(1)
-            
-        concurrent.futures.wait(futures)
+        # Generate matrix configuration (100 per chunk)
+        CHUNK_SIZE = 100
+        total = len(links_to_process)
+        chunks = []
+        if total > 0:
+            for i in range(0, total, CHUNK_SIZE):
+                chunks.append({"start": i, "end": min(i + CHUNK_SIZE, total)})
 
-    print("\n🎉 All done! Ready for GitHub to zip the files.")
+        github_output = os.getenv('GITHUB_OUTPUT')
+        if github_output:
+            with open(github_output, "a") as f:
+                if chunks:
+                    f.write(f"matrix={json.dumps({'include': chunks})}\n")
+                else:
+                    f.write('matrix={"include":[]}\n')
+
+    elif args.mode == "download":
+        comic_title = os.environ.get("COMIC_TITLE", "Comic")
+        
+        if not os.path.exists("chapters.txt"):
+            print("🛑 chapters.txt not found. Exiting.")
+            return
+
+        with open("chapters.txt", "r") as f:
+            all_links = [line.strip() for line in f if line.strip()]
+
+        links_to_process = all_links[args.start_idx:args.end_idx]
+
+        if not links_to_process:
+            print("🛑 No chapters in the defined chunk range.")
+            return
+        
+        print(f"🚀 Processing chunk from index {args.start_idx} to {args.end_idx} ({len(links_to_process)} chapters)")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CHAPTERS) as executor:
+            futures = []
+            for link in links_to_process:
+                futures.append(executor.submit(process_chapter, link, comic_title))
+                time.sleep(1)
+                
+            concurrent.futures.wait(futures)
+
+        print("\n🎉 Chunk downloaded successfully!")
 
 if __name__ == "__main__":
     main()
