@@ -137,7 +137,9 @@ jobs:
           shopt -s nullglob
           zips=(Release_Zips/*.zip)
           if [ ${#zips[@]} -gt 0 ]; then
-            gh release upload "download-${{ github.run_id }}" Release_Zips/*.zip
+            for i in {1..5}; do
+              gh release upload "download-${{ github.run_id }}" "${zips[@]}" && break || sleep 15
+            done
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
