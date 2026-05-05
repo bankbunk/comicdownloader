@@ -2,7 +2,6 @@ import argparse
 import json
 from curl_cffi import requests
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
 import time
 import re
 import zipfile
@@ -67,6 +66,9 @@ def sanitize_filename(name):
     return re.sub(r'[\\/*?:"<>|]', "", name).strip()
 
 def get_all_chapter_links():
+    # Import playwright only when generating chunks, so download runners don't need it installed
+    from playwright.sync_api import sync_playwright
+    
     chapter_links = set()
     comic_title = "Comic"
     print("🤖 Starting Playwright to dynamically extract chapter URLs...")
