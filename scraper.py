@@ -10,7 +10,7 @@ import os
 # --- CONFIGURATION ---
 COMIC_URL = "https://comix.to/title/kl2e-tomb-raider-king?group=-2"
 START_CHAPTER = 1
-END_CHAPTER = None  
+END_CHAPTER = 140  
 
 MAX_RETRIES = 6
 MAX_CHAPTER_RETRIES = 6
